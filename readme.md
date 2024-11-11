@@ -23,7 +23,7 @@ The terminal interface provides:
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.11
 - CUDA-compatible GPU for optimal transcription performance
 - Audio input device
 
