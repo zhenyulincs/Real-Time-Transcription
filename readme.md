@@ -1,4 +1,4 @@
-# Audio Recorder & Transcriber
+# Real-Time-Transcription
 
 A Python-based application that records audio from selected input devices and provides real-time transcription using the Faster Whisper model. Built with Textual for a terminal user interface.
 
