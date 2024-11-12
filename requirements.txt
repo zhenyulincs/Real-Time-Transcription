@@ -8,3 +8,4 @@ whisper
 torch
 torchvision
 torchaudio
+openai

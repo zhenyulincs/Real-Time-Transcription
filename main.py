@@ -1,10 +1,24 @@
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get OpenAI API key from environment
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+if not OPENAI_API_KEY:
+    raise ValueError("OpenAI API key not found in environment variables")
+
 from textual.app import App
-from textual.widgets import Button, Static, ListView, ListItem
+from textual.widgets import Button, Static, ListView, ListItem, Log
+from textual.containers import VerticalScroll
+import openai
 from textual.reactive import Reactive
 import pyaudio
 import wave
 import threading
 from faster_whisper import WhisperModel
+import asyncio
 
 import os
 import numpy as np
@@ -44,31 +58,41 @@ def list_audio_devices():
 class RecorderApp(App):
     recording_status: Reactive[str] = Reactive("Idle")
     transcribed_text: Reactive[str] = Reactive("")
+    gpt_response: Reactive[str] = Reactive("")
     start_time = 0
     device_list = list_audio_devices()
     audio_file = "output.wav"
     transcript_file = "transcription.txt"
+    last_processed_text = ""  # Track last processed text
     
     async def on_mount(self) -> None:
-        # Show available audio devices
+        # Create containers for transcript and response
+        self.transcript_container = VerticalScroll(Static("Transcript:", id="transcript_label"))
+        self.response_container = VerticalScroll(Static("ChatGPT Response:", id="response_label"))
+        
+        # Initialize widgets
         self.device_selection_view = ListView(
             *[ListItem(Static(f"{i}. {name}"), id=f"device_{i}") for i, name in self.device_list],
             name="device_list"
         )
         self.status = Static(f"Status: {self.recording_status}", name="status")
-        self.transcript = Static(self.transcribed_text, name="transcript")
+        self.transcript = Log(auto_scroll=True, name="transcript")
+        self.gpt_response_widget = Log(auto_scroll=True, name="gpt_response")
         self.start_button = Button(label="Start Recording", name="start")
         self.stop_button = Button(label="Stop Recording", name="stop")
 
-        # Disable the buttons until a device is selected
+        # Disable buttons until device is selected
         self.start_button.disabled = True
         self.stop_button.disabled = True
 
-        # Mount the widgets to the layout
+        # Mount widgets
         await self.mount(Static("Select an Audio Device", id="title"))
         await self.mount(self.device_selection_view)
         await self.mount(self.status)
+        await self.mount(self.transcript_container)
         await self.mount(self.transcript)
+        await self.mount(self.response_container)
+        await self.mount(self.gpt_response_widget)
         await self.mount(self.start_button, self.stop_button)
 
     async def on_list_view_selected(self, message: ListView.Selected) -> None:
@@ -100,16 +124,13 @@ class RecorderApp(App):
             self.start_button.disabled = False
             self.stop_button.disabled = True
 
-            # # Wait for all audio data to be transcribed
-            # while not audio_queue.empty():
-            #     pass
-
-            # Save the transcription to a text file
+            # Save both transcript and GPT response
             with open(self.transcript_file, "w") as f:
                 f.write(self.transcribed_text)
+            with open("gpt_response.txt", "w") as f:
+                f.write(self.gpt_response)
 
-            # Update UI status
-            self.recording_status = f"Recording saved as {self.audio_file}, transcription saved as {self.transcript_file}"
+            self.recording_status = f"Recording saved as {self.audio_file}, transcription and analysis saved"
 
     def record_audio(self) -> None:
         # Create a new wave file to write audio data to
@@ -134,6 +155,7 @@ class RecorderApp(App):
 
     def transcribe_audio(self) -> None:
         full_audio = []
+        has_new_content = False
         while recording or not audio_queue.empty():
             try:
                 data = audio_queue.get(timeout=1)  # Get data from the queue
@@ -148,10 +170,19 @@ class RecorderApp(App):
                                                         beam_size=5,
                                                         word_timestamps=False,
                                                         vad_parameters=dict(min_silence_duration_ms=500))
-                        for segment in segments:
-                            self.transcribed_text += "[%.2fs -> %.2fs] %s" % (self.start_time, self.start_time+segment.end, segment.text) + " \n"
-                            self.start_time += segment.end
-                        self.refresh_transcription()
+                        
+                        # Check if we got any segments
+                        segment_list = list(segments)
+                        if segment_list:  # Only process if we have segments
+                            has_new_content = True
+                            for segment in segment_list:
+                                self.transcribed_text += "[%.2fs -> %.2fs] %s" % (self.start_time, self.start_time+segment.end, segment.text) + " \n"
+                                self.start_time += segment.end
+                            
+                            # Only refresh if we have new content
+                            if has_new_content:
+                                self.refresh_transcription()
+                                has_new_content = False
                     except Exception as e:
                         self.recording_status = f"Transcription error: {e}"
                     full_audio = []  # Clear buffer after transcription
@@ -159,7 +190,43 @@ class RecorderApp(App):
                 pass
 
     def refresh_transcription(self) -> None:
-        self.transcript.update(self.transcribed_text)
+        self.transcript.write(self.transcribed_text)
+        # Only call GPT if we have new content and enough text
+        if (len(self.transcribed_text) > 50 and 
+            self.transcribed_text != self.last_processed_text):
+            self.last_processed_text = self.transcribed_text
+            threading.Thread(target=self._async_gpt_call).start()
+
+    def _async_gpt_call(self):
+        async def _get_response():
+            response = await self.get_gpt_response(self.transcribed_text)
+            self.gpt_response = response
+            self.gpt_response_widget.write(response)
+
+        # Create new event loop for the thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_get_response())
+        loop.close()
+
+    async def get_gpt_response(self, text: str) -> str:
+        try:
+            # Initialize OpenAI 4th API key from environment
+            client = openai.Client(api_key=OPENAI_API_KEY)
+            
+            # Send request to ChatGPT
+            response = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": "You are an interviewer and now you are interviewing with Google."},
+                        {"role": "user", "content": f"Please Answer this interview question:\n{text}"}
+                    ]
+                )
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Error getting GPT response: {str(e)}"
 
     def watch_recording_status(self, recording_status: str) -> None:
         self.status.update(f"Status: {recording_status}")

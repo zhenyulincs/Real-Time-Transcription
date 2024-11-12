@@ -1,1 +1,5 @@
 *.dll
+.env
+gpt_response.txt
+output.wav
+transcription.txt

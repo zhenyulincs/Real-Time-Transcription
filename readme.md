@@ -1,36 +1,30 @@
 # Real-Time-Transcription
 
-A Python-based application that records audio from selected input devices and provides real-time transcription using the Faster Whisper model. Built with Textual for a terminal user interface.
+A Python application for real-time audio transcription using Whisper model and summarize using ChatGPT4o, featuring a terminal-based interface built with Textual.
 
 ## Interface Screenshot
 
 ![Application Interface](./runtime_screenshot.png)
 
-The terminal interface provides:
-- A list of available audio input devices
-- Current recording status
-- Start/Stop recording buttons
-- Real-time transcription display
-
 ## Features
 
-- List and select from available audio input devices
-- Real-time audio recording
-- Live transcription using Faster-Whisper
-- Terminal-based user interface
-- Save recordings as WAV files
-- Export transcriptions to text files
+- Real-time audio recording, transcription and summarization
+- Terminal-based user interface with:
+  - Recording status indicator
+  - Start/Stop recording controls
+  - Live transcription and summarization display
+- Save transcriptions and summarization to text files
 
 ## Requirements
 
-- Python 3.11
-- CUDA-compatible GPU for optimal transcription performance
-- Audio input device
+- Python 3.11+
+- CUDA-compatible GPU (recommended)
+
 
 ## Installation
 
 1. Clone the repository
-2. Install the required dependencies:
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
